@@ -80,12 +80,11 @@ export function ignoreListOfTypes(ignoreTypes: IgnoreType[], text: string, func:
  * @return {placeholderInfo[]} The mdast nodes values replaced and generated placeholder
  */
 function replaceMdastType(text: string, placeholder: string, type: MDAstTypes): [placeholderInfo[], string] {
-  let positions: Position[] = getPositions(type, text);
+  // Nested nodes of the same type report overlapping positions, and replacing one of them shifts
+  // the offsets of the others. Masking the outermost node protects everything inside it anyway, so
+  // the nested ones are dropped rather than replaced with offsets that no longer line up.
+  const positions: Position[] = removeOverlappingPositions(getPositions(type, text));
   const replacedValues: placeholderInfo[] = [];
-
-  if (type === MDAstTypes.List) {
-    positions = removeOverlappingPositions(positions);
-  }
 
   for (const position of positions) {
     const valueToReplace = text.substring(position.start.offset, position.end.offset);
