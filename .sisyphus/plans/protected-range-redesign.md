@@ -626,6 +626,29 @@ Worth noting for whoever decides: the remaining parses are no longer masking. Th
 per batch for the context, which is the floor of this design. Getting under 15 is now a question
 about how many batches the runner makes, not about masking.
 
+### Contributor material still describing the deleted mechanism
+
+The code is done; three pieces of prose and tooling are not, and they now tell a contributor to use
+something that does not exist:
+
+- `CONTRIBUTING.md` around lines 745-770, and `docs/docs/contributing/adding-a-rule.md` around lines
+  340-365, which are near duplicates of each other. Both tell a rule author to ignore parts of a
+  document with `ignoreListOfTypes` and give a worked example using `IgnoreTypes.list`. Check whether
+  these are generated from a template before editing; `docs.js` and the `*_template.md` files are
+  where to look.
+- `eslint-rules/no-duplicate-ignore-types.js` checks for duplicates in both `ruleIgnoreTypes` arrays
+  and `ignoreListOfTypes(...)` calls. The second branch, around lines 103-110, is now dead, and the
+  rule description on line 10 names the deleted function. The `ruleIgnoreTypes` half is still
+  wanted, and it would be worth extending to `combinedWith([...])`, which is the call that replaced
+  the deleted one.
+
+What the replacement text has to say: a rule declares `ruleIgnoreTypes` as before, receives a third
+`protectedRanges` parameter, and uses `protectedRanges.combinedWith([...])` for any further types it
+wants to ignore inside its own body. It must never build a `LintContext` itself, since the point is
+that the context and its ranges are shared across a run. The idea a rule author actually needs is
+the edit range against the guard range, with `collectUnprotectedRegexReplacements` as the helper,
+and `projectionFor` with `editRangeToSource` for anything reasoning about lines.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
