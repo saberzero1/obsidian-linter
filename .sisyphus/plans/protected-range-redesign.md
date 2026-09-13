@@ -262,7 +262,8 @@ is what happened by the third rule:
 | taking micromark's own quadratic fixes | 17 | 10.4s | 20.1s |
 | batching the bullet and link edits | 17 | 9.4s | 16.4s |
 | batching the emphasis and strong delimiters | 17 | 9.4s | 14.6s |
-| normalising paragraph spacing by gaps | 17 | 9.2s | **13.6s** |
+| normalising paragraph spacing by gaps | 17 | 9.2s | 13.6s |
+| sharing a snapshot across the four cleanup rules | **15** | 8.3s | **12.6s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -1023,7 +1024,12 @@ That prices the two remaining parser-side ideas:
 - **Work from the token stream instead of the tree**, which the AST property inventory says is
   feasible but needs the helper layer rewritten: worth the 24%, about **2.2s**.
 - **Fewer parses**, which is the batch structure question: each parse is a full document, so every
-  snapshot removed is worth about **540ms**. The 3 clash boundaries alone are ~1.6s.
+  snapshot removed is worth about **550ms**. After the cleanup group, what is left is 1 parse before
+  the regular rules, 11 in the batch loop and 3 after. Of the batch loop's boundaries only 3 are
+  clashes, and a clash inherently needs a fresh snapshot for the rule that has to be re-run, so
+  those are not obviously recoverable. The clearest remaining candidate is that `yaml-title` and
+  `yaml-title-alias` each parse the whole document for the same first heading, over two snapshots
+  that differ only in frontmatter; the body they care about is identical.
 
 Neither is small, and neither is mechanical.
 
@@ -1046,9 +1052,26 @@ the `runsOnItsOwn` guard, which is the yaml rules and `rulesThatMustSeeEarlierWo
 type, and caches per text — so all 17 are genuine asks, not waste. Two of them are `yaml-title` and
 `yaml-title-alias` parsing the whole 840KB document to find the first heading.
 
-The surprise is `runAfterRegularRules`: **5 parses, about 2.7s, and it does not batch at all**. It
-applies twelve rules strictly sequentially, each on the last one's output. That is a more contained
-target than the batch loop, which is why it is being looked at first.
+`runAfterRegularRules` did not batch at all: twelve rules applied strictly in sequence, five of them
+parsing. Three of those five were the mdast consumers `blockquote-style`, `trailing-spaces` and
+`consecutive-blank-lines`, and they parsed **three different snapshots**, so sharing one between
+them was worth two parses. Done: they and the frontmatter escape rule between them now go through
+the main loop's batching, 17 parses to 15, 13.6s to 12.6s.
+
+The barriers before that group were checked rule by rule and are real:
+
+- the title is taken from the first body heading, so it must see the capitalisation rule's work, and
+  the two edits are disjoint so no clash check would catch a stale one;
+- emptying the aliases removes the frontmatter and trims the body, which can make an indented first
+  line parse as a blockquote, so blockquote style has to lead the group;
+- the timestamp rule's `alreadyModified` depends on the identity of everything before it.
+
+One thing that came out of it: the frontmatter-only escape rule and the body-only rules **can still
+clash**, because edit ranges are widened to whole lines. The existing retry handles it, and it is
+exercised by tests rather than assumed.
+
+**All 17 parses were of distinct texts**, checked by exact comparison rather than by hashing. There
+is no redundant parsing left to reclaim; every further saving has to come from making rules share.
 
 ### What is left
 
