@@ -1,0 +1,198 @@
+diff --git a/__tests__/ordered-list-style.test.ts b/__tests__/ordered-list-style.test.ts
+index bdae6f6..65aaf4b 100644
+--- a/__tests__/ordered-list-style.test.ts
++++ b/__tests__/ordered-list-style.test.ts
+@@ -1,7 +1,10 @@
+ import OrderedListStyle from '../src/rules/ordered-list-style';
+ import dedent from 'ts-dedent';
+ import {ruleTest} from './common';
+-import {OrderListItemStyles} from '../src/utils/mdast';
++import {OrderListItemEndOfIndicatorStyles, OrderListItemStyles, UnorderedListItemStyles, updateOrderedListItemIndicators, updateUnorderedListItemIndicators} from '../src/utils/mdast';
++import UnorderedListStyle from '../src/rules/unordered-list-style';
++import {ignoreListOfTypes} from '../src/utils/ignore-types';
++import {ProtectedRanges} from '../src/utils/protected-ranges';
+ 
+ ruleTest({
+   RuleBuilderClass: OrderedListStyle,
+@@ -219,3 +222,59 @@ ruleTest({
+     },
+   ],
+ });
++
++describe('list indicator protected-range compatibility', () => {
++  const documents = [
++    '10. first\n10. second\n10. third',
++    '1. outer\n   9. inner\n   9. inner\n8. after',
++    '1. outer\n   ```\n   90. code\n   - code\n   ```\n8. after',
++    '1. outer\n   $$\n   90. math\n   $$\n8. after',
++    '9. outer\n' + Array.from({length: 12}, (_, index) => `   99. nested ${index}`).join('\n') + '\n\n       ```\n       77. hidden\n       ```\n8. after',
++    '> 8. item\n>    ```\n>    90. code\n>    ```\n> 8. next\n> > 3. nested\n> > 3. nested',
++    '<!-- linter-disable -->\n+ ignored\n1. ignored\n<!-- linter-enable -->\n\n* first\n- last',
++    '1. first\n<!-- linter-disable -->\n9. hidden\n<!-- linter-enable -->\n1. after',
++    '- first #tag\n  3) ordered\n  3) ordered\n- [ ] task\n+ last',
++    '---\nitems:\n  - yaml\n---\n\n+ first\n- last',
++  ];
++  const numberOptions = Object.values(OrderListItemStyles).flatMap((numberStyle) => {
++    return Object.values(OrderListItemEndOfIndicatorStyles).flatMap((listEndStyle) => {
++      return [false, true].map((preserveStart) => ({numberStyle, listEndStyle, preserveStart}));
++    });
++  });
++
++  it.each(numberOptions)('matches ordered masking for $numberStyle/$listEndStyle, preserveStart=$preserveStart', (options) => {
++    const rule = OrderedListStyle.getRule();
++    for (const text of documents) {
++      // Empty guards on masked text retain the old helper's numbering and level-tracking behavior.
++      const expected = ignoreListOfTypes(rule.ignoreTypes, text, (masked) => {
++        return updateOrderedListItemIndicators(masked, options.numberStyle, options.listEndStyle, options.preserveStart, new ProtectedRanges([]));
++      });
++      expect(rule.apply(text, options)).toBe(expected);
++    }
++  });
++
++  it.each(Object.values(UnorderedListItemStyles))('matches unordered masking for %s', (listStyle) => {
++    const rule = UnorderedListStyle.getRule();
++    for (const text of documents) {
++      const expected = ignoreListOfTypes(rule.ignoreTypes, text, (masked) => {
++        return updateUnorderedListItemIndicators(masked, listStyle, new ProtectedRanges([]));
++      });
++      expect(rule.apply(text, {listStyle})).toBe(expected);
++    }
++  });
++
++  it('renumbers a list enclosing code without counting or changing indicators inside the code', () => {
++    const text = '1. outer\n   ```\n   90. code\n   - code\n   ```\n8. after';
++    expect(OrderedListStyle.getRule().apply(text)).toBe('1. outer\n   ```\n   90. code\n   - code\n   ```\n2. after');
++  });
++
++  it('uses the first unprotected non-checklist bullet for consistent style', () => {
++    const prefix = '<!-- linter-disable -->\n+ ignored\n<!-- linter-enable -->\n\n1. ordered\n\n- [ ] task\n\n';
++    expect(UnorderedListStyle.getRule().apply(prefix + '* first\n- last')).toBe(prefix + '* first\n* last');
++  });
++
++  it('changes an unordered marker while preserving its protected contents', () => {
++    const text = '- outer\n  ```\n  - code\n  ```\n- after';
++    expect(UnorderedListStyle.getRule().apply(text, {listStyle: UnorderedListItemStyles.Plus})).toBe('+ outer\n  ```\n  - code\n  ```\n+ after');
++  });
++});
+diff --git a/src/rules/ordered-list-style.ts b/src/rules/ordered-list-style.ts
+index ec53742..4694744 100644
+--- a/src/rules/ordered-list-style.ts
++++ b/src/rules/ordered-list-style.ts
+@@ -3,6 +3,7 @@ import {Options, RuleType} from '../rules';
+ import RuleBuilder, {BooleanOptionBuilder, DropdownOptionBuilder, ExampleBuilder, OptionBuilderBase} from './rule-builder';
+ import dedent from 'ts-dedent';
+ import {OrderListItemEndOfIndicatorStyles, OrderListItemStyles, updateOrderedListItemIndicators} from '../utils/mdast';
++import type {ProtectedRanges} from '../utils/protected-ranges';
+ 
+ class OrderedListStyleOptions implements Options {
+   numberStyle?: OrderListItemStyles = OrderListItemStyles.Ascending;
+@@ -18,13 +19,14 @@ export default class OrderedListStyle extends RuleBuilder<OrderedListStyleOption
+       descriptionKey: 'rules.ordered-list-style.description',
+       type: RuleType.CONTENT,
+       ruleIgnoreTypes: [IgnoreTypes.code, IgnoreTypes.math, IgnoreTypes.yaml, IgnoreTypes.tag],
++      usesProtectedRanges: true,
+     });
+   }
+   get OptionsClass(): new () => OrderedListStyleOptions {
+     return OrderedListStyleOptions;
+   }
+-  apply(text: string, options: OrderedListStyleOptions): string {
+-    return updateOrderedListItemIndicators(text, options.numberStyle, options.listEndStyle, options.preserveStart);
++  apply(text: string, options: OrderedListStyleOptions, protectedRanges: ProtectedRanges): string {
++    return updateOrderedListItemIndicators(text, options.numberStyle, options.listEndStyle, options.preserveStart, protectedRanges);
+   }
+   get exampleBuilders(): ExampleBuilder<OrderedListStyleOptions>[] {
+     return [
+diff --git a/src/rules/unordered-list-style.ts b/src/rules/unordered-list-style.ts
+index c3c5246..b089d95 100644
+--- a/src/rules/unordered-list-style.ts
++++ b/src/rules/unordered-list-style.ts
+@@ -3,6 +3,7 @@ import {Options, RuleType} from '../rules';
+ import RuleBuilder, {DropdownOptionBuilder, ExampleBuilder, OptionBuilderBase} from './rule-builder';
+ import dedent from 'ts-dedent';
+ import {UnorderedListItemStyles, updateUnorderedListItemIndicators} from '../utils/mdast';
++import type {ProtectedRanges} from '../utils/protected-ranges';
+ 
+ class UnorderedListStyleOptions implements Options {
+   listStyle?: UnorderedListItemStyles = UnorderedListItemStyles.Consistent;
+@@ -16,13 +17,14 @@ export default class UnorderedListStyle extends RuleBuilder<UnorderedListStyleOp
+       descriptionKey: 'rules.unordered-list-style.description',
+       type: RuleType.CONTENT,
+       ruleIgnoreTypes: [IgnoreTypes.code, IgnoreTypes.math, IgnoreTypes.yaml, IgnoreTypes.tag],
++      usesProtectedRanges: true,
+     });
+   }
+   get OptionsClass(): new () => UnorderedListStyleOptions {
+     return UnorderedListStyleOptions;
+   }
+-  apply(text: string, options: UnorderedListStyleOptions): string {
+-    return updateUnorderedListItemIndicators(text, options.listStyle);
++  apply(text: string, options: UnorderedListStyleOptions, protectedRanges: ProtectedRanges): string {
++    return updateUnorderedListItemIndicators(text, options.listStyle, protectedRanges);
+   }
+   get exampleBuilders(): ExampleBuilder<UnorderedListStyleOptions>[] {
+     return [
+diff --git a/src/utils/mdast.ts b/src/utils/mdast.ts
+index 035c6d3..ef6ca07 100644
+--- a/src/utils/mdast.ts
++++ b/src/utils/mdast.ts
+@@ -821,12 +821,27 @@ export function ensureEmptyLinesAroundHorizontalRule(text: string): string {
+   return text;
+ }
+ 
+-export function updateOrderedListItemIndicators(text: string, orderedListStyle: OrderListItemStyles, orderedListEndStyle: OrderListItemEndOfIndicatorStyles, preserveStart: boolean): string {
++export function updateOrderedListItemIndicators(text: string, orderedListStyle: OrderListItemStyles, orderedListEndStyle: OrderListItemEndOfIndicatorStyles, preserveStart: boolean, protectedRanges: ProtectedRanges): string {
+   const positions: Position[] = getPositions(MDAstTypes.List, text);
+   if (!positions) {
+     return text;
+   }
+ 
++  const listItemRegex = /^(( |\t|> )*)((\d+(\.|\)))|[-*+])([^\n]*)$/gm;
++  const protectedIndicatorLines = new Set<number>();
++  let sourceLine = 0;
++  let previousMatchOffset = 0;
++  // Nested lists are rewritten before their parents and can change indicator widths. Record
++  // eligibility against the original text by line, since renumbering never changes newlines.
++  for (const match of text.matchAll(listItemRegex)) {
++    sourceLine += countInstances(text.substring(previousMatchOffset, match.index), '\n');
++    previousMatchOffset = match.index;
++    const indicatorStart = match.index + match[1].length;
++    if (protectedRanges.isProtected(indicatorStart, indicatorStart + match[3].length)) {
++      protectedIndicatorLines.add(sourceLine);
++    }
++  }
++
+   for (const position of positions) {
+     let start = position.start.offset;
+     while (start > 0 && text.charAt(start - 1) !== '\n') {
+@@ -854,7 +869,16 @@ export function updateOrderedListItemIndicators(text: string, orderedListStyle:
+     };
+ 
+     let lastItemListIndicatorLevel = -1;
+-    listText = listText.replace(/^(( |\t|> )*)((\d+(\.|\)))|[-*+])([^\n]*)$/gm, (listItem: string, $1: string = '', _$2: string, $3: string, _$4: string, _$5: string, $6: string) => {
++    let currentLine = countInstances(text.substring(0, start), '\n');
++    let previousListMatchOffset = 0;
++    listText = listText.replace(listItemRegex, (listItem: string, $1: string = '', _$2: string, $3: string, _$4: string, _$5: string, $6: string, offset: number) => {
++      currentLine += countInstances(listText.substring(previousListMatchOffset, offset), '\n');
++      previousListMatchOffset = offset;
++      // Masked indicators neither changed nor participated in level/counter tracking.
++      if (protectedIndicatorLines.has(currentLine)) {
++        return listItem;
++      }
++
+       // _$4 is the indicator with its terminator attached (`1.` or `1)`), so it has to be
+       // parsed rather than coerced: Number('1.') is 1, but Number('1)') is NaN.
+       let listItemIndicatorNumber = (orderedListStyle === OrderListItemStyles.Preserve || preserveStart) ? parseInt(_$4, 10) : 1;
+@@ -894,8 +918,10 @@ export function updateOrderedListItemIndicators(text: string, orderedListStyle:
+   return text;
+ }
+ 
+-export function updateUnorderedListItemIndicators(text: string, unorderedListStyle: UnorderedListItemStyles): string {
+-  const positions: Position[] = getPositions(MDAstTypes.ListItem, text);
++export function updateUnorderedListItemIndicators(text: string, unorderedListStyle: UnorderedListItemStyles, protectedRanges: ProtectedRanges): string {
++  // Only the bullet changes; protected content inside an otherwise editable item is irrelevant.
++  // Filter before consistent-style selection so ignored bullets cannot choose the style.
++  const positions: Position[] = getPositions(MDAstTypes.ListItem, text).filter((position) => !protectedRanges.isProtected(position.start.offset, position.start.offset + 1));
+   if (!positions) {
+     return text;
+   }

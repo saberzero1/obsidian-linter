@@ -264,6 +264,42 @@ Two things follow for the order of the remaining work:
   back through the context so the combination is cached. Building a `LintContext` inside a rule
   instead costs ~0.9s on every call and was worth ~5s of the first measurement.
 
+## The open decision that stopped the list style rules
+
+`ordered-list-style` and `unordered-list-style` are converted and working except for one input,
+which needs a decision rather than more code. The work in progress is at
+`/tmp/opencode/list-style-wip.patch` against `1df28da`.
+
+```markdown
+1. first
+<!-- linter-disable -->
+9. hidden
+<!-- linter-enable -->
+1. after
+```
+
+With ascending numbering, masking produces `2. after` and the protected range index produces
+`1. after`.
+
+This is not a guard range question and cannot be fixed by choosing a different one. Masking does not
+merely hide the ignored section, it **replaces it with a short placeholder token**, and that token
+does not interrupt the list the way the comment does. So the masked document has one list with two
+visible items, while the real document has two lists of one item each. The numbering follows the
+structure, and the structure genuinely differs.
+
+The index is the one that matches the markdown: an html block interrupts a list, so numbering
+restarting is what the document actually says. Masking joining the two lists is an artifact of what
+the placeholder happened to look like.
+
+The same shape can arise for the other ignore types these rules declare whenever an ignored
+construct sits between two list items without being indented into one, so it is not specific to
+`customIgnore`.
+
+**Decide before converting these two:** accept that numbering restarts across an ignored section
+and name it as an intended difference, or keep the rules on masking until the rest are converted
+and revisit. Everything else converted so far is byte identical, so this is the first difference
+that would show up on an ordinary document rather than on a constructed one.
+
 ## What this will not achieve
 
 Milliseconds is not reachable. The linter applies 55 transformations in sequence over the whole
