@@ -896,6 +896,14 @@ cold scan of the whole 866KB document per detector:
 `getPositions` inside it. The regex scanning is not worth optimising, so shifting ranges would buy
 nothing and **should not be built**.
 
+> **This closure was later found to be half wrong, and the error is instructive.** The 8ms figure is
+> the cost of re-running the *regex detectors*. It correctly rules out shifting the eight regex
+> types and the three finder types. It says nothing about the **thirteen tree-derived types**, whose
+> cost is not a scan but a **550ms parse** — the note above even says shifting those "needs a proof
+> that the edit did not change the parse, which is incremental parsing by another name", and then
+> dismisses them on the scan arithmetic anyway. The right comparison for those was off by seventy
+> fold. See the section below.
+
 This corrects a claim made earlier in this document and in the commit that recorded it: the scans
 were called the expensive part of a snapshot on the strength of a gap in an attribution, not a
 measurement. The gap was the parse.
@@ -1072,6 +1080,31 @@ exercised by tests rather than assumed.
 
 **All 17 parses were of distinct texts**, checked by exact comparison rather than by hashing. There
 is no redundant parsing left to reclaim; every further saving has to come from making rules share.
+
+### Proving an edit cannot need a reparse
+
+The inversion: rather than deciding whether an edit *requires* a reparse, prove that it *cannot*,
+carry the previous tree forward with positions shifted, and reparse only when the proof fails. The
+worst case is a failed check costing almost nothing; walking ~28,000 nodes is ~3ms against a 550ms
+parse.
+
+Measured by classifying each batch transition's combined edits: no character from
+`[\n*_`~\[\]()#>+|!\\<$-]` in the removed or inserted text, and no leading or trailing space or tab
+where the edit touches the start or end of a line. **5 of 12 transitions pass**, so the ceiling is
+about **5 parses, 2.75s of 12.6s**.
+
+A first, sloppier version of the same test passed only 1 of 12, because it treated `.`, `"`, `'`,
+`:`, `=`, `{` and `}` as structural and bailed at any line edge regardless of whitespace. None of
+those carry structure inside a line. **The measured size of this prize moved by 5x purely on how
+carefully the condition was written**, which is a warning about trusting the first number.
+
+The condition as written is **not yet sound**: an edit that removes all the non-whitespace content
+from a line makes it blank, which splits a paragraph, with no structural character involved. Other
+candidates needing a verdict are setext underlines, table delimiter rows, link reference and
+footnote definitions whose labels are matched elsewhere, lazy continuation inside blockquotes and
+list items, opaque content in fenced code, HTML blocks and frontmatter, and tabs versus spaces.
+
+Under review.
 
 ### What is left
 
