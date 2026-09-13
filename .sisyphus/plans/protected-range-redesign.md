@@ -833,6 +833,25 @@ rule's edits are known, so tags, wiki links and urls outside an edited region ca
 same argument that makes shifting positions attractive applies to shifting ranges, and ranges are a
 much simpler structure than a tree.
 
+### The dependency avenue is now exhausted, with one question open
+
+Every runtime dependency was audited against its published releases for performance fixes landing
+after the pinned version. After taking the micromark ones, **there is nothing else to collect**:
+
+- `yaml` is at 2.9.1 and already has the cached anchor and alias resolution from PR #612, which
+  mattered only for documents with many anchors anyway;
+- `unist-util-visit`, `unist-util-is`, `diff-match-patch`, `quick-lru`, `moment` and every micromark
+  and mdast extension in use have no published performance fix after their pinned version;
+- `micromark` and `micromark-util-subtokenize` are now current, and subtokenize 2.0.3 additionally
+  fixed a stack overflow on large spreads that would have been waiting for us.
+
+The one open question is the local patch. Upstream's own fix for the `prepareList` quadratic, PR #51
+and commit `53875a7`, is **still unpublished**, so the patch has to stay. But upstream's version is
+not the same as ours: it adds a small list fast path, a threshold above which it stops using spread,
+and an in place suffix shift, and its PR reports 36 to 41 percent on wide lists and 11 to 15 percent
+on a 564KB document. **Ours may be the slower of the two.** Porting their implementation into the
+patch and measuring is a contained experiment worth doing before anything larger.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
