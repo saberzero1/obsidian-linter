@@ -715,6 +715,42 @@ handles its skip and exit protocol on every node, none of which this needs; a ha
 walk that pushes positions into a map is the obvious thing to try, and it should be measured on
 `getPositions` **and** on the lint before being kept.
 
+### Parsing is now everything, and it does not scale linearly
+
+At 26.8s the profile is clean: `fromMarkdown` is 17.1s, the tree walk is 0.6s, diffing 0.2s, edits
+24ms, the clash test 1ms. Every remaining avenue is the parse.
+
+Measured on slices of the 866KB document, best of three runs with the **largest measured first** so
+that neither warmup nor garbage collection favours it:
+
+| size | parse | per KB |
+|---|---:|---:|
+| 262KB | 150ms | 570µs |
+| 487KB | 412ms | 845µs |
+| 625KB | 677ms | 1084µs |
+| 840KB | 1003ms | 1195µs |
+
+Per-KB cost rises monotonically: roughly O(n^1.6). **If parsing were linear at the rate this
+document shows at 262KB, the full parse would be about 480ms rather than 1000ms**, so something
+between 8 and 9 seconds of the 26.8s is a scaling problem rather than work that has to happen.
+
+This parser already carries one quadratic fix, `patches/mdast-util-from-markdown+2.0.3.patch` for
+`prepareList`, which was 80% of parse time when it was found. It is reasonable to expect another.
+
+Two further measurements narrow it:
+
+- **Tokenising is about 70% of a parse and building the mdast tree about 30%**: `micromark` alone on
+  the 840KB document is ~900ms against ~1200ms for `fromMarkdown`. So replacing the tree with the
+  raw token stream, which several rules could probably live with, is worth at most a third.
+- Bisecting by extension was **too noisy in one process to localise anything**; the same size varied
+  by 40% between variants. What it did show is that the superlinearity is present with **no
+  extensions at all**, so it is in micromark itself rather than in frontmatter, footnotes, task
+  lists or math.
+
+The next step is a real CPU profile of one parse, not more wall-clock timing. An attempt with
+`node --cpu-prof` on a standalone script failed on module resolution and was not pursued; it wants
+doing properly, because the prize is a second `prepareList`.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
