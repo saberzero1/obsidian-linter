@@ -1104,7 +1104,37 @@ candidates needing a verdict are setext underlines, table delimiter rows, link r
 footnote definitions whose labels are matched elsewhere, lazy continuation inside blockquotes and
 list items, opaque content in fenced code, HTML blocks and frontmatter, and tabs versus spaces.
 
-Under review.
+**Closed: 0 of 12 transitions survive a sound condition.** The loose test's 5 accepts all fall, and
+the result holds under every looser reading considered, applied together.
+
+The blacklist approach cannot be made sound at all: CommonMark recognition is contextual and
+sometimes document-global. A reference definition's label decides whether every matching `[label]`
+elsewhere is plain text or a `linkReference`, so an edit to one changes the tree far away with no
+structural character anywhere near it. Ordinary letters can complete an HTML terminator such as
+`</script>`. There is no finite set of characters that makes an edit safe.
+
+The sound replacement is structural rather than lexical: accept an edit only if it is **strictly
+interior to a single source-transparent `text` leaf**, with no ancestor among the link, reference,
+code, html, yaml, math or heading types, no line ending touched, and no markdown punctuation in the
+non-whitespace run around it. Measured against the same 12 transitions, **condition 1 alone rejects
+ten of the eleven non-empty ones**.
+
+**The structural reason it fails is worth keeping, because it is not obvious and it is not fixable
+by writing a better condition.** A batch can be carried forward only if *every* edit in it is inert,
+and the batches are deliberately large — one has 286 edits across ten rules. Batching and inertness
+pull in opposite directions: **every rule added to a batch removes a parse but lowers the chance the
+whole batch qualifies to skip one.** Having already batched aggressively, we have made the edit sets
+precisely the ones least likely to be provably inert. The two optimisations are not complementary;
+they are substitutes, and we already took the one that pays.
+
+Also learned, and relevant to any future attempt: **shifting positions would not have been enough
+anyway.** The tree carries `value` strings, heading text, definition identifiers, code language and
+meta, and task state, all of which would go stale. And `positionsByType` stores the *same*
+`Position` objects as the tree, so shifting both would double-apply the delta.
+
+Reparsing only the affected block and splicing was also rejected, and by the stronger argument:
+CommonMark block boundaries propagate through lists, lazy continuation, unclosed fences and html,
+and document-global definitions, so choosing the block to reparse is harder than this was.
 
 ### What is left
 
