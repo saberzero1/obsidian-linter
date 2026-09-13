@@ -256,7 +256,8 @@ is what happened by the third rule:
 | `blockquote-style`, `space-between-chinese-...` | 21 | 21.2s | 80.9s |
 | eight more expression rules | 21 | 21.6s | 76.4s |
 | the rest, and masking deleted | 17 | 17.9s | 73.1s |
-| one tree walk per parse instead of six | 17 | 17.0s | **58.8s** |
+| one tree walk per parse instead of six | 17 | 17.0s | 58.8s |
+| not rehashing the document per cache lookup | 17 | 16.1s | **31.3s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -653,6 +654,34 @@ Collecting every type on the first walk took the lint from 73.1s to 58.8s, measu
 **The lesson, which cost two wrong guesses to learn: measure the breakdown before optimising it.**
 The diffing was the obvious suspect, it was architecturally interesting to remove, the refactor had
 already put the information in place to remove it, and it was worth 0.3% of the run.
+
+### The tree walk was never the cost: it was hashing the document to look things up
+
+After the walk was reduced to one per parse, `getPositions` still measured 36.5s over 76 calls, so
+the walk looked like what was left. It is not. On this document:
+
+| | |
+|---|---:|
+| nodes in the tree | 28,307 |
+| a plain recursion collecting every position | **3ms** |
+| `unist-util-visit` with no test | 37ms |
+| `unist-util-visit` with a list of types as its test | 94ms |
+| sorting every bucket afterwards | 2ms |
+| parsing | 751ms |
+| **`hashString53Bit` over the 866KB document** | **288ms** |
+| **the same, 76 times, which is what a lint did** | **21.6s** |
+
+Both the parsed markdown and the protected ranges are kept in caches keyed on a hash of the
+document, and `getPositions` goes through the parse cache on every call. So each call read all
+866KB to compute a key it had already computed. Comparing the string first makes that free when it
+is the same string, since that is a reference comparison; `hashDocument` in `src/utils/strings.ts`
+does it, and the lint went from 59.1s to 31.3s.
+
+Two things worth keeping from how this was found. The instrumentation attributed the time to
+`getPositions`, which was true and misleading: the cost was inside the cache lookup it makes first,
+not the walk it is named for. And the walk had already been optimised twice on the assumption it
+was expensive, when it was three milliseconds all along. **Attribution by wrapper tells you which
+function, not which line.**
 
 ### Where the remaining time is, measured after the tree walk fix
 
