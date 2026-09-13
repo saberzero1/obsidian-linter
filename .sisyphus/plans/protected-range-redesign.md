@@ -1160,10 +1160,22 @@ quote the ratio, not the seconds.
 6,152ms at `37d1f70` against 1,537ms now, **4.00x**, with the median document 8.10ms to 4.44ms and
 p90 24.73ms to 8.28ms. Documents under 2KB improved 2.2x as a group.
 
-Two tiny documents are genuinely slower, with non-overlapping ranges across runs: an
-`insert-yaml-attributes` example of 19 bytes, 3.26ms to 5.04ms, and an
-`escape-yaml-special-characters` example of 329 bytes, 9.34ms to 10.36ms. Six others looked slower
-but sat inside run-to-run noise.
+Two tiny documents appeared slower, with "non-overlapping ranges across runs" — an
+`insert-yaml-attributes` example of 19 bytes and an `escape-yaml-special-characters` one of 329
+bytes. **That regression does not exist.** Re-measured in isolation at n=1600 per document, the new
+code is 2 to 3x *faster* on both, with clearly separated distributions, and it replicates with cold
+caches:
+
+| document | old median | new median |
+|---|---:|---:|
+| 19 B | 2.06ms | **0.96ms** |
+| 329 B | 3.93ms | **1.29ms** |
+
+The original claim rested on **two runs per document** at millisecond scale. Two runs is not a
+measurement, and "non-overlapping ranges" over n=2 means nothing. This is the third time in this
+work that a number was reported before it was trustworthy — the others being the sampled hash that
+invented a duplicate parse, and the loose inertness condition that overstated its prize fivefold.
+**The habit to keep is that a difference is not real until it survives repetition.**
 
 **The corpus has no 2-10KB documents at all** — 225 of its 226 files are under 2KB and the only
 larger one is an excerpt of the big fixture. The size range that most Obsidian notes actually
