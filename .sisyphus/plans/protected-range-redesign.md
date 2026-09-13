@@ -797,6 +797,42 @@ machinery is done. Going further means one of:
   a parser migration and every helper is written against mdast;
 - **fewer rule passes**, which is a different design again.
 
+### Everything left scales with the number of snapshots, not the number of rules
+
+Timing every rule individually gives a **flat** distribution, not a few expensive ones:
+
+```
+unordered-list-style       1961ms      space-after-list-markers    749ms
+paragraph-blank-lines      1592ms      heading-blank-lines         748ms
+strong-style               1495ms      quote-style                 743ms
+ordered-list-style         1028ms      move-footnotes-to-the-bottom 727ms
+remove-link-spacing         989ms      file-name-heading           721ms
+trailing-spaces             862ms      convert-bullet-list-markers 717ms
+```
+
+`convert-bullet-list-markers` swaps one bullet character for another and costs 717ms. There is a
+floor of roughly 700ms that every rule pays regardless of what it does, and the total across rules
+is 20.6s, which is the whole lint. That is the clue: **`Rule.apply` wraps the parse and the range
+computation**, so the earlier split into "10.4s parsing and 8.5s rule bodies" was mis-attributed.
+Most of what looked like rule work is shared infrastructure charged to whichever rule happened to
+trigger it.
+
+What actually drives the cost is that **each new snapshot needs a fresh parse and a fresh set of
+range scans**. The caches are per `LintContext`, and a `LintContext` belongs to one document, so
+every one of the 17 snapshots pays for: one parse, plus one scan per ignore type it uses. Thirty
+nine rules declare ignore types between them but only about 25 distinct **sets**, over about 15
+distinct types, and the most common set is shared by 11 rules. Within a snapshot that sharing works.
+Across snapshots nothing is shared at all.
+
+So the remaining ~19s is roughly `17 x (parse + range scans)`, and the rule bodies proper are a
+small part of it. **This re-values the batch structure work.** It is not worth "about 3 parses",
+it is worth about 3 snapshots out of 17 of everything above, which is nearer 3.5s than 1.8s.
+
+It also suggests a cheaper question first: **are the range scans shareable across snapshots?** A
+rule's edits are known, so tags, wiki links and urls outside an edited region cannot have moved. The
+same argument that makes shifting positions attractive applies to shifting ranges, and ranges are a
+much simpler structure than a tree.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
