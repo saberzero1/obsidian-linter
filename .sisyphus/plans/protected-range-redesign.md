@@ -285,12 +285,33 @@ positions still taken from the shared parse of the original, costs no parse at a
 
 So build, per document and per ignore type set, and cache on the `LintContext` next to the ranges:
 
-- a **projection**, the original text with each protected range replaced by exactly the placeholder
-  masking would have used. `createPlaceholderGenerator` in `src/utils/ignore-types.ts` already
-  produces those deterministically, so the projection can be made **byte identical to the masked
-  text**. That is the whole point: a decision taken on the projection is identical to the decision
-  masking took, by construction, rather than by an argument about markdown that has to be got right
-  case by case;
+- a **projection**, the original text with each protected range replaced by a single line token.
+
+  **Byte identity with the masked text is not reachable in one pass, and the argument below that
+  claimed otherwise was wrong.** `getSeedForText` seeds from the length of the text *the current
+  stage sees*, not the original, and then probes that candidate against that stage's whole text,
+  which already contains earlier placeholders. So the same document yields different seeds at
+  different stages: for "wiki links and tags next to urls" under `no-bare-urls` the link, wiki link
+  and tag stages seed from lengths 90, 101 and 127 and produce three different suffixes, where a
+  single pass over the original would use one. Intermediate lengths alone do not fix it either,
+  because the collision probe can push the seed on, and earlier replacements can create or destroy
+  the candidate string. `mergeRanges` also throws away which type each range came from, while
+  masking emits a type specific placeholder per range.
+
+  Reproducing the bytes therefore needs a stage aware replay, and the mdast stage of that replay
+  needs the staged text parsed, which is the cost being removed. So that route is closed.
+
+  What to do instead: give each range a token that is **structurally** what masking's placeholder
+  was, a single line, non whitespace, not resembling markdown syntax, and **the same length** as the
+  placeholder that type would have produced. Trap #9 records that placeholder length has changed
+  the linted document before, so length is not a free choice. Correctness then rests on the corpus
+  differential per converted rule, which is the standard every other conversion here has been held
+  to, rather than on an equality proof.
+
+  Before relying on it, check the weaker property that is still provable: that the projection has
+  the same line count as the masked text, and that the two agree line for line on which lines are
+  blank. That is what the six blocked rules actually read, and it is cheap to assert over the
+  corpus;
 - an **offset map** both ways between projection coordinates and source coordinates. The ranges are
   sorted and disjoint, so this is a pair of parallel arrays and a binary search, the same shape as
   `ProtectedRanges` itself.
@@ -320,10 +341,11 @@ than per batch it will show up immediately, which is exactly what happened when 
 `LintContext`.
 
 What to verify first, before converting anything onto it: assert on the corpus that the projection
-equals the text `ignoreListOfTypes` produces for the same document and ignore types. That is a
-direct, cheap equality check, and it is the same kind of evidence that settled whether the range
-index matched masking in the first place. If that assertion holds, the six conversions become
-ordinary work.
+and the text `ignoreListOfTypes` produces have the same number of lines and agree on which of those
+lines are blank. Full equality is not available, for the reasons above, but that weaker property is
+exactly what the six blocked rules read, and it is cheap to check over the corpus for every ignore
+type set any rule declares. If it holds, the six conversions become ordinary work gated by the
+differential.
 
 Until this exists those six hold masking alive, and with it the ~14 parses that `ignoreListOfTypes`
 costs.
