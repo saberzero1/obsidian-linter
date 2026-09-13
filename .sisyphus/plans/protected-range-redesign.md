@@ -260,7 +260,8 @@ is what happened by the third rule:
 | not rehashing the document per cache lookup | 17 | 16.1s | 31.3s |
 | keying the caches on the document itself | 17 | 17.1s | 26.8s |
 | taking micromark's own quadratic fixes | 17 | 10.4s | 20.1s |
-| batching the bullet and link edits | 17 | 9.4s | **16.4s** |
+| batching the bullet and link edits | 17 | 9.4s | 16.4s |
+| batching the emphasis and strong delimiters | 17 | 9.4s | **14.6s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -947,9 +948,35 @@ also what stops them being batched:
 - `makeEmphasisOrBoldConsistent` and `updateBlockquotes` need an inner node rewritten before the
   outer one containing it, which is Trap #3 and cannot be expressed as a non overlapping edit list.
 
-Their combined remaining cost is about 2.5s. Getting it would mean changing what each helper
-computes, not just how it applies the result, so it is a rule behaviour question rather than a
-mechanical one.
+Since then `makeEmphasisOrBoldConsistent` **was** batched, and it was the largest of them at 1.7s
+between the two style rules. It only ever rewrites the two delimiter runs, and nested nodes of one
+type have **disjoint delimiters** even though the nodes overlap: `*)*g**` gives nodes `[0,6]` and
+`[2,5]` whose delimiters are `[0,1]`,`[5,6]` against `[2,3]`,`[4,5]`. Emitting delimiter edits
+sidesteps Trap #3 rather than fighting it. The lint went 16.4s to 14.6s.
+
+**`updateBlockquotes` is genuinely sequential** and should stay that way. For style `space` the
+expression `/>([^ ]|$)/g` **consumes** the second `>` while inserting the inter-marker space, so one
+pass over `>>ab` can only produce `> >ab`; the inner rewrite has to happen first for the outer one
+to see `>> ab` and produce `> > ab`. The `no space` path has the same shape with `/>[ \t]+>/g`. That
+dependency is already pinned by a regression test, and the prize is 185ms.
+
+**`updateOrderedListItemIndicators` was reformulated and reverted.** The reformulation is sound:
+discard list nodes contained in another so the outermost ranges are disjoint, then emit only the
+indicator edit rather than rebuilding the list's text, since an inner rewrite changes only digits
+and a delimiter and cannot affect indentation, newlines, ordered versus unordered classification, or
+the first indicator at a new level. It passed every gate and was byte identical. It also made **no
+measurable difference**: 15.0s and 14.4s against a 14.6s baseline.
+
+So the 984ms this rule costs is not the rebuilding. The likely explanation is that the document's
+lists are shallow, so the quadratic rarely bites and the time is the line oriented scan over list
+text, but **that is unconfirmed** and worth measuring before anyone tries again. The work is kept at
+`.sisyphus/plans/ordered-list-batching-wip.patch`.
+
+`makeSureThereIsOnlyOneBlankLineBeforeAndAfterParagraphs` remains, at 897ms. The analysed
+reformulation is to emit one edit per **gap** rather than per expanded paragraph range, keyed on the
+gap's own bounds so that two adjacent paragraphs claiming the same gap emit it once, with the
+first-and-last-paragraph and hard-line-break cases as the named hazards. Given what happened with
+the ordered lists, **measure where its 897ms actually goes before reformulating it.**
 
 Two cautions from the conversions. The edits must be sorted and non-overlapping before applying, and
 that has been the unsafe part of several changes here, so assert it rather than assume it. And
