@@ -852,6 +852,44 @@ and an in place suffix shift, and its PR reports 36 to 41 percent on wide lists 
 on a 564KB document. **Ours may be the slower of the two.** Porting their implementation into the
 patch and measuring is a contained experiment worth doing before anything larger.
 
+### Shifting ranges instead of rescanning: assessed, not attempted
+
+The idea was to carry a snapshot's protected ranges into the next one by moving them past the edits
+that produced it, rather than rescanning the document. The edits are known exactly and the place to
+do it is `src/rules-runner.ts`, at `text = replaceTextRanges(snapshot, batchedEdits)`, where both
+snapshots and the sorted edit list are in scope. Neither `runBeforeRegularRules` nor
+`runAfterRegularRules` has an edit list at all, so they would need one derived first.
+
+The blocker is which types can be shifted:
+
+- **Thirteen of the twenty four come from `getPositions`** and therefore from the tree: `code`,
+  `inlineCode`, `image`, `thematicBreak`, `italics`, `bold`, `list`, `blockquote`, `math`,
+  `inlineMath`, `html`, `heading`, `link`. Shifting these needs a proof that the edit did not change
+  the parse, which is incremental parsing by another name.
+- **Eight come from a regex** and could in principle be shifted: `yaml`, `wikiLink`,
+  `obsidianMultiLineComments`, `footnoteAtStartOfLine`, `footnoteAfterATask`, `url`, `anchorTag`,
+  `templaterCommand`. Several are still boundary sensitive: `url` is greedy so an adjacent character
+  changes its extent, `yaml` matches only the first block and its end depends on following text.
+- **Three come from a finder**: `tag` excludes the whitespace in front of it, so the character
+  before it matters; `table` reads following rows and preceding lines; `customIgnore` pairs a start
+  marker with a later end marker.
+
+And the rules are not gentle: they insert and delete newlines, rewrite whole yaml sections, and move
+footnotes to the end of the document.
+
+**But the arithmetic may still favour it, and this is the part to measure first.** Since the tree
+walk now collects every type in one 3ms pass, the mdast derived ranges are nearly free once the
+document is parsed. What costs is the regex scanning: `url` is an enormous expression, `tag` uses
+unicode property escapes, and both run over the whole document for every snapshot. Those are exactly
+the shiftable ones.
+
+So the missing number is **how a snapshot's range computation splits between the parse and the regex
+scans**. If the scans are a small part of it, this is not worth doing and the only remaining lever is
+the parse count. If they are most of it, a narrow version limited to the regex types, with a
+verification mode comparing shifted ranges against a rescan per type across the corpus, is worth
+building. Compare per type rather than the merged union, since merging discards type identity and
+would hide a type level error.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
