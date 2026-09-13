@@ -429,8 +429,7 @@ keeping `ignoreListOfTypes` alive and the cost is worth paying.
   every protected multiline construct.
 - `move-footnotes-to-the-bottom`, `re-index-footnotes`. These search the whole document and move
   content, so exclude protected occurrences from discovery but keep the ordering logic global.
-- `default-language-for-code-fences`, `move-math-block-indicators-to-their-own-line`,
-  `remove-link-spacing`, `trailing-spaces`, `yaml-title`.
+- `yaml-title`, and the two footnote rules below, are the cheap ones still outstanding.
 - `blockquote-style` and `space-between-chinese-japanese-or-korean-and-english-or-numbers` last:
   they build regexes from `IgnoreTypes.*.placeholder` and read placeholder text out of the
   document, so they must be converted before placeholders can be removed. The CJK rule deliberately
