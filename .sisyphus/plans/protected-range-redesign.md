@@ -248,8 +248,17 @@ is what happened by the third rule:
 | `remove-space-before-or-after-characters` | 33 | 32.4s | 94.3s |
 | `remove-multiple-spaces` | 31 | - | - |
 | `remove-space-around-characters` | 29 | 27.6s | 83.9s |
+| `emphasis-style`, `strong-style` | 28 | 28.7s | ~85s |
+| `ordered-list-style`, `unordered-list-style` | 26 | - | - |
+| `default-language-for-code-fences`, `remove-link-spacing` | 25 | - | - |
+| `trailing-spaces` | 25 | 25.9s | 83.8s |
 
-All byte identical over the corpus throughout.
+Eleven rules converted. All 226 corpus documents byte identical against the source as it was before
+any of this work, throughout.
+
+The parse counts in this table are for the whole 866KB document. The cheap 600 line excerpt the
+default test run measures went 30 to 20 over the same commits, so it moves faster; use the full
+fixture when comparing against the goal.
 
 **So: judge a step by the parse count, which is the thing being removed, and only expect lint time
 to fall once most of the rules in a batch are converted.** Do not revert a step that reduced parses
