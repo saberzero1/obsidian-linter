@@ -330,6 +330,60 @@ stopped the work. When one appears, write down the smallest input that shows it,
 whether masking's answer was intended behaviour or an artifact of what the placeholder looked like.
 Artifacts are not worth reproducing; intended behaviour is.
 
+### A rule has to be told what it may see, not only what it may write
+
+Everything above is about which characters a rule may **change**. There is a second kind, found
+converting the `empty-line-around-*` family: a rule that **reads** the text around its target to
+decide what to do.
+
+`empty-line-around-math-blocks` ignores `code`. Given this document:
+
+````markdown
+> ```
+> code
+> ```
+> $$
+> x
+> $$
+````
+
+masking produces a blank quote line between the two:
+
+````markdown
+> ```
+> code
+> ```
+>
+> $$
+> x
+> $$
+````
+
+and computing from the original text leaves the document alone. `codeBlockBlockquoteRegex` finds
+the neighbouring fence in the original text and takes the branch that preserves the spacing;
+masking had replaced that fence with a placeholder, so the expression did not match and the other
+branch ran. Swapping the two blocks shows the same thing on the other side. No write guard can fix
+it, because the difference happens before any edit is chosen.
+
+`redactProtected` in `src/utils/protected-ranges.ts` is for this: it returns a short window of the
+document with the protected ranges in it replaced by a neutral token, which is what the expression
+would have seen under masking. It needs no parse and is bounded by the window, so it does not cost
+the win back. Its result is for **decisions only**; the offsets in it are not source offsets and
+must never be used to locate an edit.
+
+### The `empty-line-around-*` family is deferred, on purpose
+
+Only `empty-line-around-math-blocks` of the four contributes a parse from its body; the other three
+do not appear in the measurement at all. Against that,
+`makeSureContentHasEmptyLinesAddedBeforeAndAfter` reaches through
+`makeSureContentHasASingleEmptyLine*ForBlockquote`, `getIndexOfEndOfLastNonEmptyLine` and
+`getIndexOfStartOfFirstNonEmptyLine`, all of which interleave reads of the surrounding text with
+the offsets they then write at. Redaction cannot simply be threaded through that, because the same
+string is used for both.
+
+So convert the cheaper rules first and come back to this family last, when it is the only thing
+keeping `ignoreListOfTypes` alive and the cost is worth paying.
+
 ### What is left
 
 - `ordered-list-style`, `unordered-list-style` - written, blocked on the decision below.
