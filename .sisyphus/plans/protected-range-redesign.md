@@ -764,6 +764,39 @@ The patch for `mdast-util-from-markdown` is still needed: its own list quadratic
 fixed on `main` in commit `53875a7` but has not been released beyond 2.0.3. Delete the patch when a
 release containing that commit exists, not before.
 
+### The profile at 20 seconds
+
+Parse scaling was re-measured after the update rather than assumed, best of three with the largest
+first: 635µs/KB at 262KB, 659 at 487KB, 722 at 625KB, 721 at 840KB. **Flat.** The climb to 1195µs/KB
+is gone, and the 1.14x drift that remains looks like allocation rather than an algorithm.
+
+Where the 20.1s goes:
+
+| | ms | calls |
+|---|---:|---:|
+| parsing, inside `getPositions` | 10,400 | 17 |
+| `getPositions` total, so ~0.9s of its own work | 11,306 | 76 |
+| `protectedRangesFor`, which is almost entirely the above | 11,353 | 81 |
+| `getEditsBetween` | 227 | 32 |
+| `regex edit collection` | 91 | 47,487 |
+| `projectionFor` | 23 | 19 |
+| `replaceTextRanges` | 21 | 45 |
+| `clash test` | 1 | 19 |
+
+That accounts for about 11.7s. The remaining **~8.5s is the rule bodies themselves**, 45 rules each
+making at least one pass over 866KB, which is exactly what "What this will not achieve" predicted
+would be the floor of this design.
+
+So the shape now is roughly **half parsing, two fifths rules, one twentieth machinery**, and the
+machinery is done. Going further means one of:
+
+- **fewer parses**, which is the batch structure question: worth about 3 of the 17, and every route
+  to them changes rule ordering;
+- **a faster parser.** The one published benchmark that includes micromark puts `markdown-it` about
+  24x faster and `commonmark.js` about 30x on a small fixture, so there may be a lot here, but it is
+  a parser migration and every helper is written against mdast;
+- **fewer rule passes**, which is a different design again.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
