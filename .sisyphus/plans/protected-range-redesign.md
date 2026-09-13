@@ -877,18 +877,24 @@ The blocker is which types can be shifted:
 And the rules are not gentle: they insert and delete newlines, rewrite whole yaml sections, and move
 footnotes to the end of the document.
 
-**But the arithmetic may still favour it, and this is the part to measure first.** Since the tree
-walk now collects every type in one 3ms pass, the mdast derived ranges are nearly free once the
-document is parsed. What costs is the regex scanning: `url` is an enormous expression, `tag` uses
-unicode property escapes, and both run over the whole document for every snapshot. Those are exactly
-the shiftable ones.
+**The arithmetic does not favour it, and this was measured rather than reasoned about.** Timing one
+cold scan of the whole 866KB document per detector:
 
-So the missing number is **how a snapshot's range computation splits between the parse and the regex
-scans**. If the scans are a small part of it, this is not worth doing and the only remaining lever is
-the parse count. If they are most of it, a narrow version limited to the regex types, with a
-verification mode comparing shifted ranges against a rescan per type across the corpus, is worth
-building. Compare per type rather than the merged union, since merging discards type identity and
-would hide a type level error.
+| | ms | | ms |
+|---|---:|---|---:|
+| `url` | 6 | `tag` | 0 |
+| `table` | 2 | `wikiLink` | 0 |
+| `yaml` | 0 | `templaterCommand` | 0 |
+| `anchorTag` | 0 | `obsidianMultiLineComments` | 0 |
+| `customIgnore` | 0 | the two footnote detectors | 0 |
+
+**About 8ms for all eleven**, and across a whole lint `protectedRangesFor` costs ~48ms more than the
+`getPositions` inside it. The regex scanning is not worth optimising, so shifting ranges would buy
+nothing and **should not be built**.
+
+This corrects a claim made earlier in this document and in the commit that recorded it: the scans
+were called the expensive part of a snapshot on the strength of a gap in an attribution, not a
+measurement. The gap was the parse.
 
 ### What is left
 
