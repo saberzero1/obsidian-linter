@@ -371,6 +371,43 @@ would have seen under masking. It needs no parse and is bounded by the window, s
 the win back. Its result is for **decisions only**; the offsets in it are not source offsets and
 must never be used to locate an edit.
 
+### The hard class is rules that reason about lines
+
+A pattern has emerged across the conversions. The rules that convert cleanly are the ones that work
+on **spans**: a regex match, an mdast node's delimiters, an insertion point. The ones that fight
+back are the ones that reason about **which line something is on**, and they fight back for the
+same reason every time: masking replaced a multi line construct with a **single line** token, so the
+text around it became adjacent in a way it is not in the original, and the rule's idea of where a
+line starts and ends moved with it.
+
+Two are deferred for this reason.
+
+**`move-math-block-indicators-to-their-own-line`.** For
+
+````markdown
+> `x
+y` $$x$$
+````
+
+masking gives
+
+````markdown
+> `x
+y`
+> $$
+> x
+> $$
+````
+
+and the original text gives the same thing without the `>` prefixes on the math. The inline code
+span runs across two lines, masking collapsed it to one, and that left the `>` visible on the line
+the math effectively starts on. Redacting the physical line window does not recover it, because the
+window itself is the wrong shape. A conversion attempt also turned up a second, unrelated problem:
+`breakMathBlockIntoMultipleBlocksIfNeedBe` can return overlapping ranges, which a single pass
+collection of replacements does not survive, and it inserted a stray `$$$$` on malformed input. None
+of the 226 corpus documents change either way, but the stray `$$$$` is a corruption and not
+something to accept.
+
 ### The `empty-line-around-*` family is deferred, on purpose
 
 Only `empty-line-around-math-blocks` of the four contributes a parse from its body; the other three
@@ -386,7 +423,7 @@ keeping `ignoreListOfTypes` alive and the cost is worth paying.
 
 ### What is left
 
-- `ordered-list-style`, `unordered-list-style` - written, blocked on the decision below.
+- `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
 - The `empty-line-around-*` family and their `ensureEmptyLinesAround*` helpers. These depend on the
   source lines either side of the target, so add fixtures where the target sits directly against
   every protected multiline construct.
@@ -399,8 +436,14 @@ keeping `ignoreListOfTypes` alive and the cost is worth paying.
   document, so they must be converted before placeholders can be removed. The CJK rule deliberately
   *keeps* spaces around links, wiki links, inline code and inline math, so it needs "is this CJK
   character next to a protected range of one of these four types", not a plain skip.
-- Then `ignoreListOfTypes` and the helpers left without callers, including `updateHeaderText`,
-  `updateListItemText` and `ensureEmptyLinesAround*`, can go.
+- Then `ignoreListOfTypes` and the helpers left without callers can go. Note that
+  `updateListItemText` and `updateHeaderText` already have no callers in `src/`, but are still
+  imported by `__tests__/trailing-spaces.test.ts`, `__tests__/remove-multiple-spaces.test.ts`,
+  `__tests__/remove-space-around-characters.test.ts` and
+  `__tests__/remove-space-before-or-after-characters.test.ts`, which run the old implementation
+  beside the new one and assert they agree. Those are worth keeping until the migration is over, so
+  delete the helpers and those comparisons together rather than deleting the helpers and finding
+  the tests will not compile.
 
 ## How the list style grouping was decided
 
