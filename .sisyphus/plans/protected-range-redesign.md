@@ -417,6 +417,28 @@ collection of replacements does not survive, and it inserted a stray `$$$$` on m
 of the 226 corpus documents change either way, but the stray `$$$$` is a corruption and not
 something to accept.
 
+### `yaml-title` costs a parse rather than saving one
+
+A conversion of `yaml-title` was written and dropped. It behaved correctly, the corpus did not
+change, and it still **raised** the parse count from 20 to 21 on the excerpt. The rule runs from
+`runAfterRegularRules`, on its own rather than in a batch, so the ranges it asks for are worked out
+for a document nothing else is looking at, and that costs more than the parse it saves. Check the
+parse count before assuming a conversion is worth having; a rule outside the batched run has
+nothing to share with.
+
+It also turned up a third pre-existing corruption, not yet decided. For
+
+````markdown
+#
+```
+```
+````
+
+the heading expression's `\s+` runs across the newline and swallows the masked code block, so the
+title ends up holding the whole block and the frontmatter comes out as a `title: |-` block scalar
+with no indentation, which is not valid yaml. Whoever converts this rule has to decide whether to
+reproduce that or to leave the heading alone when the match crosses into a protected region.
+
 ### The `empty-line-around-*` family is deferred, on purpose
 
 Only `empty-line-around-math-blocks` of the four contributes a parse from its body; the other three
