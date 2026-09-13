@@ -239,9 +239,17 @@ converted rule that sees the same text. Masking paid it per rule but on a *small
 each stage shrinks the text the next one scans.
 
 The consequence is that converting one rule is net negative on wall time and only the parse count
-improves. Converting `remove-space-before-or-after-characters` took the 866KB lint from 36 parses
-to 33 and from ~87s to ~94s, with output byte identical. The lint time turns around once enough
-rules share the ranges to cover their cost.
+improves. The lint time turns around once enough rules share the ranges to cover their cost, which
+is what happened by the third rule:
+
+| After converting | Parses | Parsing | Lint |
+|---|---|---|---|
+| nothing | 36 | 33.5s | 87.0s |
+| `remove-space-before-or-after-characters` | 33 | 32.4s | 94.3s |
+| `remove-multiple-spaces` | 31 | - | - |
+| `remove-space-around-characters` | 29 | 27.6s | 83.9s |
+
+All byte identical over the corpus throughout.
 
 **So: judge a step by the parse count, which is the thing being removed, and only expect lint time
 to fall once most of the rules in a batch are converted.** Do not revert a step that reduced parses
