@@ -258,7 +258,8 @@ is what happened by the third rule:
 | the rest, and masking deleted | 17 | 17.9s | 73.1s |
 | one tree walk per parse instead of six | 17 | 17.0s | 58.8s |
 | not rehashing the document per cache lookup | 17 | 16.1s | 31.3s |
-| keying the caches on the document itself | 17 | 17.1s | **26.8s** |
+| keying the caches on the document itself | 17 | 17.1s | 26.8s |
+| taking micromark's own quadratic fixes | 17 | 10.4s | **20.1s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -747,9 +748,21 @@ Two further measurements narrow it:
   extensions at all**, so it is in micromark itself rather than in frontmatter, footnotes, task
   lists or math.
 
-The next step is a real CPU profile of one parse, not more wall-clock timing. An attempt with
-`node --cpu-prof` on a standalone script failed on module resolution and was not pursued; it wants
-doing properly, because the prize is a second `prepareList`.
+**It was a second `prepareList`, and it was already fixed upstream.** The lock held
+`micromark@4.0.0` and `micromark-util-subtokenize@2.0.0`, both predating two fixes for quadratic
+behaviour in micromark's event array: `micromark/micromark#171`, which took the reporter's 500KB
+samples from 55 seconds to under 2 and shipped in `micromark-util-subtokenize@2.0.1`, and
+`micromark/micromark#185`, which took a repeated label pattern from 500ms to 3ms and shipped in
+`micromark@4.0.1`. Updating both took parsing from 17.1s to 10.4s and the lint from 26.8s to 20.1s.
+
+Two things worth keeping from that. The superlinearity was measured locally and correctly, and the
+cause was a **dependency version**, which no amount of profiling this repository's own code would
+have found. And `npm update` on two transitive packages was worth more than every change made to
+this codebase's own parsing since the masking was removed.
+
+The patch for `mdast-util-from-markdown` is still needed: its own list quadratic, issue #49, is
+fixed on `main` in commit `53875a7` but has not been released beyond 2.0.3. Delete the patch when a
+release containing that commit exists, not before.
 
 ### What is left
 
