@@ -896,6 +896,52 @@ This corrects a claim made earlier in this document and in the commit that recor
 were called the expensive part of a snapshot on the strength of a gap in an attribution, not a
 measurement. The gap was the parse.
 
+### The best remaining lever: five helpers rebuild the document once per edit
+
+Timing every rule **net of any parse it triggered** inverts the earlier reading. The lint divides as
+10.3s parsing, 9.5s rule work, 0.2s everything else, and the rule work is not spread evenly:
+
+| rule | net | parse |
+|---|---:|---:|
+| `unordered-list-style` | 1962ms | 0 |
+| `strong-style` | 1507ms | 0 |
+| `ordered-list-style` | 984ms | 0 |
+| `paragraph-blank-lines` | 897ms | 536 |
+| `remove-link-spacing` | 855ms | 0 |
+| `empty-line-around-code-fences` | 468ms | 0 |
+| the other 37 rules together | 1403ms | |
+
+**Five rules are 6.2s of the 9.5s.** An earlier reading of this called the distribution flat with no
+hot rule; that was wrong, and the reason is worth remembering: it timed `Rule.apply`, which contains
+the parse, so whichever rule happened to trigger a parse looked expensive and the real outliers were
+buried.
+
+They have one cause. Each of those helpers calls
+`replaceTextBetweenStartAndEndWithNewValue` **inside a loop over positions**, which rebuilds the
+whole document per edit:
+
+| `src/utils/mdast.ts` | helper |
+|---|---|
+| 523 | `makeEmphasisOrBoldConsistent` |
+| 701 | `makeSureThereIsOnlyOneBlankLineBeforeAndAfterParagraphs` |
+| 740 | `removeSpacesInLinkText` |
+| 992 | `updateOrderedListItemIndicators` |
+| 1036 | `updateUnorderedListItemIndicators` |
+| 1072 | `updateBlockquotes` |
+
+On a document with more than three thousand list items that is quadratic, and it explains why
+`unordered-list-style`, which only swaps a bullet character, costs a tenth of the whole lint.
+
+**The fix is already in the codebase.** `replaceTextRanges` applies a sorted, non-overlapping edit
+list in one pass, and it is what the converted rules use. These helpers should collect their edits
+and apply them once, exactly as `remove-space-before-or-after-characters` and the rest now do.
+
+Two cautions from the conversions. The edits must be sorted and non-overlapping before applying, and
+that has been the unsafe part of several changes here, so assert it rather than assume it. And
+nested nodes of one type report overlapping positions, Trap #3, so `makeEmphasisOrBoldConsistent`
+and `updateBlockquotes` deliberately rely on rewriting one position at a time in descending order;
+converting those two needs care that the others do not.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
