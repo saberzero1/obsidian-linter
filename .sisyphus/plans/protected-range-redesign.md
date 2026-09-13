@@ -1027,6 +1027,29 @@ That prices the two remaining parser-side ideas:
 
 Neither is small, and neither is mechanical.
 
+### Where the 17 parses come from
+
+Attributed by phase, with the batch loop traced rule by rule:
+
+| phase | parses |
+|---|---:|
+| `runBeforeRegularRules` | 1 |
+| `runRulesInBatches` | 11 |
+| `runAfterRegularRules` | **5** |
+| custom regex | 0 |
+
+The batch loop's 11 boundaries are **3 clashes** (`quote-style`,
+`remove-space-before-or-after-characters`, `remove-trailing-punctuation-in-heading`) and the rest
+the `runsOnItsOwn` guard, which is the yaml rules and `rulesThatMustSeeEarlierWork`.
+
+`LintContext` is **already lazy** — it parses only when a rule asks for an mdast-derived ignore
+type, and caches per text — so all 17 are genuine asks, not waste. Two of them are `yaml-title` and
+`yaml-title-alias` parsing the whole 840KB document to find the first heading.
+
+The surprise is `runAfterRegularRules`: **5 parses, about 2.7s, and it does not batch at all**. It
+applies twelve rules strictly sequentially, each on the last one's output. That is a more contained
+target than the batch loop, which is why it is being looked at first.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
