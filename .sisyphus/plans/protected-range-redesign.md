@@ -654,6 +654,33 @@ Collecting every type on the first walk took the lint from 73.1s to 58.8s, measu
 The diffing was the obvious suspect, it was architecturally interesting to remove, the refactor had
 already put the information in place to remove it, and it was worth 0.3% of the run.
 
+### Where the remaining time is, measured after the tree walk fix
+
+| | ms | calls |
+|---|---:|---:|
+| `getPositions`, which does the one walk per parse | 36,461 | 76 |
+| `protectedRangesFor`, which is almost entirely the above | 36,515 | 81 |
+| `projectionFor` | 23 | 19 |
+| `getAllTablesInText` | 8 | 2 |
+| `getAllCustomIgnoreSectionsInText` | 0 | 0 |
+
+So **the walk itself is now about 62% of a 59s lint**, at roughly 2.1s each across 17 parses, and
+everything else in the range machinery is noise. The two leads left over from the earlier map are
+both dead: the custom ignore scan does not run at all on this document, and the table scan is 8ms.
+Sharing range unions across snapshots would save nothing either, since the unions are not where the
+time goes.
+
+One thing was tried and reverted: handing `visit` a list of sixteen types makes it test every node
+against the whole list, so the walk was changed to visit every node and do one map lookup instead.
+That is 38.6s to 36.5s measured on `getPositions` directly, but it does not survive into the lint
+time, which stays at 59s either way. Not worth a micro optimisation carrying a comment that claims
+a benefit the end to end number cannot show.
+
+If anyone wants the next chunk, it is the walk. `unist-util-visit` maintains ancestor chains and
+handles its skip and exit protocol on every node, none of which this needs; a hand written recursive
+walk that pushes positions into a map is the obvious thing to try, and it should be measured on
+`getPositions` **and** on the lint before being kept.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
