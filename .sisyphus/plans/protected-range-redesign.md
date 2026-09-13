@@ -594,6 +594,38 @@ parsing something other than the original could be the right answer.
 
 Both reverts are clean; the tree at that commit is green and byte identical.
 
+### Deleting the masking costs a parse, so it is a trade rather than a tidy up
+
+Every rule that declares `ruleIgnoreTypes` is converted. Three callers of `ignoreListOfTypes`
+remain: `yaml-title` and `yaml-title-alias`, which mask **inside their bodies** to find the first
+level one heading, and the fallback branch in `Rule.apply` that exists for them.
+
+Those two were converted, together, on the theory that they would then share one context and one set
+of ranges for the same text. **They do not, and the parse count went from 12 to 13.** They run from
+`runAfterRegularRules`, outside the batched run, and each of them changes the text, so neither the
+context nor the ranges are shared with anything. Working the ranges out for a text nothing else
+looks at costs about what parsing it costs, which is the same thing that made converting `yaml-title`
+alone a loss earlier. Converting both at once does not rescue it.
+
+The conversion itself was otherwise good: it selects the first heading whose whole match is
+unprotected, and it declines to reproduce the invalid yaml the old code produced for a heading whose
+text runs into a code block, with **0 of 226 corpus documents changing**. The work in progress is
+kept at `.sisyphus/plans/yaml-title-wip.patch` against `0899034`.
+
+So the decision is a trade, and it is not obviously worth taking:
+
+- **Convert them**, delete `ignoreListOfTypes`, the `Rule.apply` branch and the dead helpers, and
+  end with a single mechanism and no masking anywhere, at a cost of **one parse**.
+- **Leave them**, keep the parse, and keep the masking machinery alive for two rules that do not
+  benefit from moving.
+
+Since the goal is fewer than 15 parses and the 866KB lint currently sits at 16, converting them
+moves away from the number this work exists to improve. That is why it has not been done.
+
+Worth noting for whoever decides: the remaining parses are no longer masking. They are roughly one
+per batch for the context, which is the floor of this design. Getting under 15 is now a question
+about how many batches the runner makes, not about masking.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
