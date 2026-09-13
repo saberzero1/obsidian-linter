@@ -255,6 +255,8 @@ is what happened by the third rule:
 | the two footnote rules | 23 | 22.9s | 81.9s |
 | `blockquote-style`, `space-between-chinese-...` | 21 | 21.2s | 80.9s |
 | eight more expression rules | 21 | 21.6s | 76.4s |
+| the rest, and masking deleted | 17 | 17.9s | 73.1s |
+| one tree walk per parse instead of six | 17 | 17.0s | **58.8s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -625,6 +627,32 @@ moves away from the number this work exists to improve. That is why it has not b
 Worth noting for whoever decides: the remaining parses are no longer masking. They are roughly one
 per batch for the context, which is the floor of this design. Getting under 15 is now a question
 about how many batches the runner makes, not about masking.
+
+### What the time actually went on, once it was measured
+
+The plan assumed parsing was the cost and that removing masking would remove it. Parsing was 33.5s
+of 87.0s, and removing masking took it to 17s. That left ~50s nobody had accounted for, and two
+guesses about it were wrong before anything was measured:
+
+| Suspected | Actual |
+|---|---|
+| `getEditsBetween` diffing the whole document per rule, no timeout | **237ms**. diff-match-patch trims the common prefix and suffix first, and these strings differ by a handful of edits |
+| the clash test widening every edit to its surrounding lines | **1ms** |
+| applying the edits | **26ms** |
+| the regex scans for `tag` and `wikiLink`, which use unicode property escapes | **84ms** across 47,487 calls |
+| working out the protected ranges | **45,682ms of 68,711ms**, two thirds of the lint |
+
+All of that 45.7s was walking the tree: 26.3s for the ignore types a rule declares, 19.3s for the
+types the mdast helpers ask for directly. The second number is the one that had been missed.
+Paragraphs, list items and footnote definitions are never ignore types, so they were never part of
+the set collected in one walk, and each request for them walked the whole tree again. About six
+walks per parse.
+
+Collecting every type on the first walk took the lint from 73.1s to 58.8s, measured back to back.
+
+**The lesson, which cost two wrong guesses to learn: measure the breakdown before optimising it.**
+The diffing was the obvious suspect, it was architecturally interesting to remove, the refactor had
+already put the information in place to remove it, and it was worth 0.3% of the run.
 
 ### What is left
 
