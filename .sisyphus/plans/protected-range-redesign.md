@@ -257,7 +257,8 @@ is what happened by the third rule:
 | eight more expression rules | 21 | 21.6s | 76.4s |
 | the rest, and masking deleted | 17 | 17.9s | 73.1s |
 | one tree walk per parse instead of six | 17 | 17.0s | 58.8s |
-| not rehashing the document per cache lookup | 17 | 16.1s | **31.3s** |
+| not rehashing the document per cache lookup | 17 | 16.1s | 31.3s |
+| keying the caches on the document itself | 17 | 17.1s | **26.8s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -673,9 +674,13 @@ the walk looked like what was left. It is not. On this document:
 
 Both the parsed markdown and the protected ranges are kept in caches keyed on a hash of the
 document, and `getPositions` goes through the parse cache on every call. So each call read all
-866KB to compute a key it had already computed. Comparing the string first makes that free when it
-is the same string, since that is a reference comparison; `hashDocument` in `src/utils/strings.ts`
-does it, and the lint went from 59.1s to 31.3s.
+866KB to compute a key it had already computed. Remembering the last document's hash took the lint
+from 59.1s to 31.3s, and hashing then still cost 5.3s for the seventeen documents it had to do.
+
+Keying the caches on the **document itself** removed the rest. The engine keeps a string's hash on
+the string once it has been used as a key, so it is computed once per document and never again, and
+Trap #11 goes away with it: there is no bucket to collide in, so nothing has to compare the text
+afterwards to check it got the right one. 31.3s to 26.8s, and `hashString53Bit` now has no callers.
 
 Two things worth keeping from how this was found. The instrumentation attributed the time to
 `getPositions`, which was true and misleading: the cost was inside the cache lookup it makes first,
