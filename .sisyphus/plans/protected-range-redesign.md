@@ -252,9 +252,37 @@ is what happened by the third rule:
 | `ordered-list-style`, `unordered-list-style` | 26 | - | - |
 | `default-language-for-code-fences`, `remove-link-spacing` | 25 | - | - |
 | `trailing-spaces` | 25 | 25.9s | 83.8s |
+| the two footnote rules | 23 | 22.9s | 81.9s |
+| `blockquote-style`, `space-between-chinese-...` | 21 | 21.2s | 80.9s |
+| eight more expression rules | 21 | 21.6s | 76.4s |
 
-Eleven rules converted. All 226 corpus documents byte identical against the source as it was before
-any of this work, throughout.
+Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
+before any of this work, throughout.
+
+### The one thing standing between here and the goal
+
+Six rules are left on masking for the same reason, and they are the reason `ignoreListOfTypes`
+cannot go yet:
+
+- `move-math-block-indicators-to-their-own-line`
+- the four `empty-line-around-*` rules
+- `remove-empty-list-markers`
+- `remove-trailing-punctuation-in-heading`
+- `heading-blank-lines`
+
+Every one of them decides something from **where a line begins or ends**, and masking replaced a
+multi line ignored construct with a **single line** token, so the document they were reasoning about
+had a different line structure from the real one. `redactProtected` solves the half of this where a
+rule reads neighbouring syntax, but not this half: the window itself is the wrong shape.
+
+Solving it properly means giving a rule a view of the document in which each protected range
+occupies one line, without rewriting the document or parsing it again, and mapping the decisions
+back to source offsets. That is a piece of design, not a conversion, and it should be done once
+rather than per rule. Until then those six hold masking alive, and with it the ~14 parses that
+`ignoreListOfTypes` costs.
+
+The remaining parses split roughly as: one per batch for the ranges, which is the floor, plus the
+masking parses those six rules still force.
 
 The parse counts in this table are for the whole 866KB document. The cheap 600 line excerpt the
 default test run measures went 30 to 20 over the same commits, so it moves faster; use the full
