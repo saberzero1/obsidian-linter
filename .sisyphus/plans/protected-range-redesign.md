@@ -259,7 +259,8 @@ is what happened by the third rule:
 | one tree walk per parse instead of six | 17 | 17.0s | 58.8s |
 | not rehashing the document per cache lookup | 17 | 16.1s | 31.3s |
 | keying the caches on the document itself | 17 | 17.1s | 26.8s |
-| taking micromark's own quadratic fixes | 17 | 10.4s | **20.1s** |
+| taking micromark's own quadratic fixes | 17 | 10.4s | 20.1s |
+| batching the bullet and link edits | 17 | 9.4s | **16.4s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -932,9 +933,23 @@ whole document per edit:
 On a document with more than three thousand list items that is quadratic, and it explains why
 `unordered-list-style`, which only swaps a bullet character, costs a tenth of the whole lint.
 
-**The fix is already in the codebase.** `replaceTextRanges` applies a sorted, non-overlapping edit
-list in one pass, and it is what the converted rules use. These helpers should collect their edits
-and apply them once, exactly as `remove-space-before-or-after-characters` and the rest now do.
+**Two of the six are done**, `updateUnorderedListItemIndicators` and `removeSpacesInLinkText`, and
+they were worth 3.7s: the lint went from 20.1s to 16.4s. The bullets are collected as one character
+edits rather than whole item spans, so nested items do not overlap, and the link trims are disjoint
+by construction.
+
+**The other four read text an earlier iteration rewrote**, which is what makes them quadratic and
+also what stops them being batched:
+
+- `updateOrderedListItemIndicators` rereads nested lists whose indicator widths have changed;
+- `makeSureThereIsOnlyOneBlankLineBeforeAndAfterParagraphs` has expanded ranges that share blank line
+  separators, and scans backwards through text it has already rewritten;
+- `makeEmphasisOrBoldConsistent` and `updateBlockquotes` need an inner node rewritten before the
+  outer one containing it, which is Trap #3 and cannot be expressed as a non overlapping edit list.
+
+Their combined remaining cost is about 2.5s. Getting it would mean changing what each helper
+computes, not just how it applies the result, so it is a rule behaviour question rather than a
+mechanical one.
 
 Two cautions from the conversions. The edits must be sorted and non-overlapping before applying, and
 that has been the unsafe part of several changes here, so assert it rather than assume it. And
