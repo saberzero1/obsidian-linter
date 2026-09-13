@@ -264,6 +264,90 @@ Two things follow for the order of the remaining work:
   back through the context so the combination is cached. Building a `LintContext` inside a rule
   instead costs ~0.9s on every call and was worth ~5s of the first measurement.
 
+## How to convert the rest
+
+Five rules are converted: `remove-space-before-or-after-characters`, `remove-multiple-spaces`,
+`remove-space-around-characters`, `emphasis-style`, `strong-style`. Read one of them before
+starting; they are the worked examples.
+
+### The one question that decides every conversion
+
+Every change has two ranges, and they are not the same:
+
+- the **edit range**, the characters actually rewritten;
+- the **guard range**, the characters masking would have had to *show the rule* for the change to
+  happen at all. Skip the change when the guard range is protected.
+
+The guard range differs per rule, and the test is always: **would the placeholder that stood in for
+the ignored region have satisfied what this rule matches on?**
+
+| The rule anchors on | A placeholder is | Guard on | Example |
+|---|---|---|---|
+| any non whitespace | one, so masking did make the change | the edit range only | `remove-multiple-spaces` |
+| specific characters the user configured | not one | the whole match | `remove-space-*-characters` |
+| an mdast node's delimiters | irrelevant, the interior is copied through | the delimiters only | `emphasis-style` |
+
+Getting this backwards is the main way to break a conversion, and three of the five needed it
+corrected. The enclosing versus enclosed case is the one that catches people: formatting *around*
+an ignored region is editable, because masking replaced only the region and left the delimiters
+visible; formatting *inside* one is not.
+
+### Mechanics
+
+- `usesProtectedRanges: true` in the rule's `super({...})`, third parameter
+  `protectedRanges: ProtectedRanges`. Leave `ruleIgnoreTypes` alone.
+- For the second set of types a rule masks inside its own body, use
+  `protectedRanges.combinedWith([...])`. **Never** construct a `LintContext` inside a rule; it
+  costs ~0.9s per call on the large fixture because nothing is cached.
+- Use `collectUnprotectedRegexReplacements` in `src/utils/protected-ranges.ts` for regex driven
+  rules. It takes the edit range and the guard range separately.
+- Collect every change against the text the rule was given and apply them once with
+  `replaceTextRanges`. Do not rewrite the text between passes.
+- A helper with a single caller moves with that caller, in place. A helper with several callers
+  gets a second version beside it until the last caller has moved.
+
+### Verification, every step
+
+```bash
+npx jest && npx eslint src/ __tests__/ && npx tsc --noEmit -p tsconfig.json   # 63 errors exactly
+DUMP_PATH=/tmp/new.txt npx jest __tests__/zz-runner-diff.test.ts
+diff /tmp/committed.txt /tmp/new.txt                                          # must be empty
+npx jest __tests__/zz-parse-count.test.ts                                     # must not go up
+```
+
+Dump `/tmp/committed.txt` from the last commit before starting, and re-dump it after every commit;
+a stale baseline is worse than none. To check against the linter as it was before any of this work,
+`git checkout 37d1f70 -- src/`, dump, then `git checkout HEAD -- src/`.
+
+The corpus missed a real difference once, because it had no document with two spaces next to a
+link. When a conversion turns on a boundary the corpus does not contain, add the document.
+
+### Expect conflicts, and do not guess
+
+Four of the five conversions turned up an input where the index and masking genuinely disagree.
+Two were worth accepting as named differences, one was a pre-existing corruption bug, and one
+stopped the work. When one appears, write down the smallest input that shows it, and decide
+whether masking's answer was intended behaviour or an artifact of what the placeholder looked like.
+Artifacts are not worth reproducing; intended behaviour is.
+
+### What is left
+
+- `ordered-list-style`, `unordered-list-style` - written, blocked on the decision below.
+- The `empty-line-around-*` family and their `ensureEmptyLinesAround*` helpers. These depend on the
+  source lines either side of the target, so add fixtures where the target sits directly against
+  every protected multiline construct.
+- `move-footnotes-to-the-bottom`, `re-index-footnotes`. These search the whole document and move
+  content, so exclude protected occurrences from discovery but keep the ordering logic global.
+- `default-language-for-code-fences`, `move-math-block-indicators-to-their-own-line`,
+  `remove-link-spacing`, `trailing-spaces`, `yaml-title`.
+- `blockquote-style` and `space-between-chinese-japanese-or-korean-and-english-or-numbers` last:
+  they build regexes from `IgnoreTypes.*.placeholder` and read placeholder text out of the
+  document, so they must be converted before placeholders can be removed. The CJK rule deliberately
+  *keeps* spaces around links, wiki links, inline code and inline math, so it needs "is this CJK
+  character next to a protected range of one of these four types", not a plain skip.
+- Then `ignoreListOfTypes` and the helpers left without callers, including `updateHeaderText`,
+  `updateListItemText` and `ensureEmptyLinesAround*`, can go.
+
 ## The open decision that stopped the list style rules
 
 `ordered-list-style` and `unordered-list-style` are converted and working except for one input,
