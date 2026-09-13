@@ -1136,6 +1136,46 @@ Reparsing only the affected block and splicing was also rejected, and by the str
 CommonMark block boundaries propagate through lists, lazy continuation, unclosed fences and html,
 and document-global definitions, so choosing the block to reparse is harder than this was.
 
+### Measured for the PR: baseline, small documents, memory
+
+All the performance evidence in this document comes from one 866KB document, which is not
+representative. Three things were measured before writing a PR.
+
+**The real baseline is `master`, not this branch's starting point.** `37d1f70` is not on master; this
+branch began from already-optimised code on `perf/ignore-types-single-pass`. Measured in throwaway
+worktrees, one run each:
+
+| commit | what | parses | parsing | lint |
+|---|---|---:|---:|---:|
+| `437d49d` | `master` | 119 | 181.7s | **337.6s** |
+| `3e9a988` | fork point | 119 | 181.0s | 339.5s |
+| `37d1f70` | this branch's baseline | 36 | 50.4s | 105.0s |
+| `7c853be` | current | 15 | 9.0s | **13.7s** |
+
+**The honest claim is about 25x against master.** Note `37d1f70` measures 105.0s here against the
+87.0s recorded earlier in this document: single runs on a loaded machine vary by around 20%, so
+quote the ratio, not the seconds.
+
+**Small documents did not regress; they improved.** Over the 226-document corpus, twice each way:
+6,152ms at `37d1f70` against 1,537ms now, **4.00x**, with the median document 8.10ms to 4.44ms and
+p90 24.73ms to 8.28ms. Documents under 2KB improved 2.2x as a group.
+
+Two tiny documents are genuinely slower, with non-overlapping ranges across runs: an
+`insert-yaml-attributes` example of 19 bytes, 3.26ms to 5.04ms, and an
+`escape-yaml-special-characters` example of 329 bytes, 9.34ms to 10.36ms. Six others looked slower
+but sat inside run-to-run noise.
+
+**The corpus has no 2-10KB documents at all** — 225 of its 226 files are under 2KB and the only
+larger one is an excerpt of the big fixture. The size range that most Obsidian notes actually
+occupy is therefore still unmeasured.
+
+**Memory: both caches are bounded by entry count, not by bytes, and that is a hazard.** Linting the
+866KB fixture once retains 290MB now against 476MB at `37d1f70`, so this work improved it. But the
+mdast cache holds `maxSize: 200` entries of `{text, ast, positionsByType}` keyed on whole documents.
+At the measured retention for this fixture, **200 large entries would retain about 2.35GB**. The
+corpus run filled both caches to their limits at a harmless 10MB, because those documents are tiny.
+The limit is pre-existing, from `571d90f`, but this work leans on the cache far more heavily.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
