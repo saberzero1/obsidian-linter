@@ -549,6 +549,51 @@ string is used for both.
 So convert the cheaper rules first and come back to this family last, when it is the only thing
 keeping `ignoreListOfTypes` alive and the cost is worth paying.
 
+### The last rule, and why it is last
+
+`paragraph-blank-lines` is the only rule still on masking, and it is what keeps `ignoreListOfTypes`
+alive. Two attempts have been made and both reverted.
+
+The first found that `getProjectedNodeRanges` drops a node whose **start** maps inside a token, but
+a paragraph can begin inside a protected table and run past it, so the visible part loses its edits:
+
+```markdown
+# H
+| a |
+| - |
+| b |
+Paragraph
+Next
+```
+
+masking puts a blank line either side of the table and around each paragraph; mapping node ranges
+dropped the paragraph whole and changed nothing.
+
+The second clamped such a node to its visible extent, which fixes that case, and then hit a second
+one:
+
+```markdown
+A
+%%
+B
+%%
+```
+
+masking puts a blank line after `A` and the converted rule does not. The reason is that
+`obsidianMultiLineComments` is a **regex** ignore type, not an mdast node, so mdast reads the whole
+of that document as **one paragraph**. Masking replaced the comment with a token and the rule then
+saw a paragraph followed by a one line token; on the original text there is a single paragraph node
+spanning everything, and clamping it to its visible extent is not the same thing.
+
+So the general shape of the problem is: for this rule the **node boundaries themselves** differ
+between the two worlds, not merely their offsets. Anyone finishing it should work out whether the
+paragraph positions should come from parsing the projection rather than the original. That would
+cost one parse of a different text and needs weighing against what removing masking saves, which is
+the remaining ~14 parses; it may well be worth it, and it is the one place in this work where
+parsing something other than the original could be the right answer.
+
+Both reverts are clean; the tree at that commit is green and byte identical.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
