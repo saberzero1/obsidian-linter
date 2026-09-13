@@ -1000,6 +1000,33 @@ nested nodes of one type report overlapping positions, Trap #3, so `makeEmphasis
 and `updateBlockquotes` deliberately rely on rewriting one position at a time in descending order;
 converting those two needs care that the others do not.
 
+### What the parsing actually consists of
+
+The 9.2s is entirely `fromMarkdown`, and `fromMarkdown` divides like this on the 866KB document,
+best of three:
+
+| | ms | share |
+|---|---:|---:|
+| `fromMarkdown`, the whole call | 536 | |
+| preprocess, tokenise and postprocess, via micromark's stage exports | 408 | **76%** |
+| building the mdast tree from the events | 128 | 24% |
+
+So three quarters of it is micromark tokenising, and a quarter is turning the token stream into
+nodes. Note micromark's stage exports (`parse`, `preprocess`, `postprocess`) **are** reachable from
+the installed package, so measuring this needs no new dependency.
+
+And every one of the 17 parses is of the **whole document**: the sizes are 840KB, 840, 840, 839 and
+so on, 14.3MB of parsing for an 840KB file. Nothing parses a fragment.
+
+That prices the two remaining parser-side ideas:
+
+- **Work from the token stream instead of the tree**, which the AST property inventory says is
+  feasible but needs the helper layer rewritten: worth the 24%, about **2.2s**.
+- **Fewer parses**, which is the batch structure question: each parse is a full document, so every
+  snapshot removed is worth about **540ms**. The 3 clash boundaries alone are ~1.6s.
+
+Neither is small, and neither is mechanical.
+
 ### What is left
 
 - `move-math-block-indicators-to-their-own-line` - deferred, see the line reasoning above.
