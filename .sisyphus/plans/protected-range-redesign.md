@@ -1177,9 +1177,38 @@ work that a number was reported before it was trustworthy — the others being t
 invented a duplicate parse, and the loose inertness condition that overstated its prize fivefold.
 **The habit to keep is that a difference is not real until it survives repetition.**
 
-**The corpus has no 2-10KB documents at all** — 225 of its 226 files are under 2KB and the only
-larger one is an excerpt of the big fixture. The size range that most Obsidian notes actually
-occupy is therefore still unmeasured.
+**The corpus had no 2-10KB documents at all**, so the size range most Obsidian notes occupy was
+unmeasured. Filled with generated notes containing the constructs the rules actually target —
+headings, nested lists, tasks, links, code, quotes, tables, footnotes, frontmatter, CJK — four
+documents per size, every rule enabled, 15 to 60 iterations depending on size. Ratio is baseline
+divided by current:
+
+| size | baseline median | current median | ratio | ms/KB before | ms/KB after |
+|---:|---:|---:|---:|---:|---:|
+| 2KB | 125.1ms | 13.7ms | **9.11x** | 62.5 | 6.9 |
+| 5KB | 341.1ms | 44.2ms | 7.72x | 68.2 | 8.8 |
+| 10KB | 713.5ms | 87.1ms | 8.20x | 71.4 | 8.7 |
+| 25KB | 1946.8ms | 253.3ms | 7.69x | 77.9 | 10.1 |
+| 50KB | 4047.4ms | 583.0ms | 6.94x | 81.0 | 11.7 |
+| 100KB | 8837.8ms | 1355.4ms | 6.52x | 88.4 | 13.6 |
+
+**No crossover: faster at every size and variant measured, nothing regressed.** Messy documents,
+which actually give the rules work to do rather than exercising the fast path, come out 6.97x at
+10KB and 6.26x at 50KB — so the gain is not an artefact of measuring already-clean documents.
+
+Two things worth noticing. The advantage is **largest on the smallest notes**, which says the old
+cost was dominated by per-rule document rebuilding rather than by parsing. And **parse count is
+almost flat with size** — 10 at 2KB, 12 from 5KB to 250KB, 14 for messy — because batch boundaries
+are structural, not proportional to the document. The 866KB fixture needing 15 is the same
+structure, not a size effect.
+
+Per-KB cost still rises with size on both sides, 6.9 to 13.6 ms/KB here. Removing the constant
+overhead has made what remains more visible, not worse.
+
+**Vault retention is bounded as designed.** Linting 1,000 distinct notes with the caches never
+cleared, heap plateaus by about note 400 and stays there: 62.1MiB retained, the parse cache at
+63.5MiB of its 64MiB budget and the context cache at 16.0MiB of 16MiB. No growth from note 400 to
+1,000.
 
 **Memory: both caches are bounded by entry count, not by bytes, and that is a hazard.** Linting the
 866KB fixture once retains 290MB now against 476MB at `37d1f70`, so this work improved it. But the
