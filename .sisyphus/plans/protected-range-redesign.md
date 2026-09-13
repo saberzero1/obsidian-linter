@@ -225,6 +225,37 @@ The variable must be named `mock*` or jest rejects the factory. Note lint timing
 10% run to run, so do not trust a single measurement of a small change; parse **count** is stable
 and is the better signal.
 
+## What the first conversion measured
+
+Read this before judging a step by its lint time.
+
+Working out a document's protected ranges costs about as much as parsing it. On the 866KB file the
+ranges for one rule's ignore types take ~1.2s and a further ~0.9s for the `list` and `html` a rule
+masks inside its own body, against ~1s for a parse. Nearly all of that is the mdast traversals and
+the `tag` and `wikiLink` expressions over the whole document; the rule's own expressions are 4ms.
+
+That cost is per document, not per rule, and is cached, so it is paid once and shared by every
+converted rule that sees the same text. Masking paid it per rule but on a *smaller* document, since
+each stage shrinks the text the next one scans.
+
+The consequence is that converting one rule is net negative on wall time and only the parse count
+improves. Converting `remove-space-before-or-after-characters` took the 866KB lint from 36 parses
+to 33 and from ~87s to ~94s, with output byte identical. The lint time turns around once enough
+rules share the ranges to cover their cost.
+
+**So: judge a step by the parse count, which is the thing being removed, and only expect lint time
+to fall once most of the rules in a batch are converted.** Do not revert a step that reduced parses
+because it cost a few seconds.
+
+Two things follow for the order of the remaining work:
+
+- Convert rules that share ignore types together, so the ranges they share are worked out once.
+  `remove-space-around-characters` and `remove-multiple-spaces` have almost the same list as the
+  rule already converted and do the same nested `list` masking, so they are the next slice.
+- The nested masking a rule does inside its body needs `ProtectedRanges.combinedWith`, which goes
+  back through the context so the combination is cached. Building a `LintContext` inside a rule
+  instead costs ~0.9s on every call and was worth ~5s of the first measurement.
+
 ## What this will not achieve
 
 Milliseconds is not reachable. The linter applies 55 transformations in sequence over the whole
