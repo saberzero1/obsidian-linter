@@ -261,7 +261,8 @@ is what happened by the third rule:
 | keying the caches on the document itself | 17 | 17.1s | 26.8s |
 | taking micromark's own quadratic fixes | 17 | 10.4s | 20.1s |
 | batching the bullet and link edits | 17 | 9.4s | 16.4s |
-| batching the emphasis and strong delimiters | 17 | 9.4s | **14.6s** |
+| batching the emphasis and strong delimiters | 17 | 9.4s | 14.6s |
+| normalising paragraph spacing by gaps | 17 | 9.2s | **13.6s** |
 
 Twenty-two rules converted. All 226 corpus documents byte identical against the source as it was
 before any of this work, throughout.
@@ -972,11 +973,26 @@ lists are shallow, so the quadratic rarely bites and the time is the line orient
 text, but **that is unconfirmed** and worth measuring before anyone tries again. The work is kept at
 `.sisyphus/plans/ordered-list-batching-wip.patch`.
 
-`makeSureThereIsOnlyOneBlankLineBeforeAndAfterParagraphs` remains, at 897ms. The analysed
-reformulation is to emit one edit per **gap** rather than per expanded paragraph range, keyed on the
-gap's own bounds so that two adjacent paragraphs claiming the same gap emit it once, with the
-first-and-last-paragraph and hard-line-break cases as the named hazards. Given what happened with
-the ordered lists, **measure where its 897ms actually goes before reformulating it.**
+`makeSureThereIsOnlyOneBlankLineBeforeAndAfterParagraphs` **is done**, and measuring first is what
+justified it. Stubbing out its rebuild call and running everything else gave 1ms against 789ms, so
+the rebuilding really was all of it: 5,477 paragraph nodes and 1,179 rebuilds per pass. The ordered
+list helper had looked identical and measured the opposite, which is why the measurement is worth
+the five minutes.
+
+It now emits one edit per **gap**, keyed on the gap's own bounds so two adjacent paragraphs claiming
+the same run of newlines emit it once. 14.6s to 13.6s.
+
+**The gaps are taken by reproducing the old expansion character for character, not by scanning for
+newlines**, and that distinction is the whole correctness story. The old code advances one character
+past the paragraph before consuming newlines; on a CRLF document that character is the carriage
+return. A newline-only scan left it in place and inserted before it, so a document ending `\r`
+became one ending `\n\n\r`. **None of the 226 corpus documents use CRLF**, so the differential was
+empty while the behaviour had changed. Obsidian runs on Windows, so that was real traffic, not a
+corner case. There are eight tests for it now.
+
+That is the eighth time in this work that an empty differential was necessary and not sufficient.
+**If a change touches line endings, whitespace runs, or document boundaries, write the test before
+trusting the corpus.**
 
 Two cautions from the conversions. The edits must be sorted and non-overlapping before applying, and
 that has been the unsafe part of several changes here, so assert it rather than assume it. And
