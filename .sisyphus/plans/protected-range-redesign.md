@@ -275,11 +275,58 @@ multi line ignored construct with a **single line** token, so the document they 
 had a different line structure from the real one. `redactProtected` solves the half of this where a
 rule reads neighbouring syntax, but not this half: the window itself is the wrong shape.
 
-Solving it properly means giving a rule a view of the document in which each protected range
-occupies one line, without rewriting the document or parsing it again, and mapping the decisions
-back to source offsets. That is a piece of design, not a conversion, and it should be done once
-rather than per rule. Until then those six hold masking alive, and with it the ~14 parses that
-`ignoreListOfTypes` costs.
+### How to solve it: project the document, do not mask it
+
+The framing that kept this stuck was treating "reproduce masking's line structure" as the same thing
+as "reproduce masking". It is not. **Masking's cost was never the string rewriting. It was that the
+rewritten text was handed to the rule, so every mdast helper the rule called parsed that text
+instead of the shared one.** A copy of the document used *only to decide things*, with node
+positions still taken from the shared parse of the original, costs no parse at all.
+
+So build, per document and per ignore type set, and cache on the `LintContext` next to the ranges:
+
+- a **projection**, the original text with each protected range replaced by exactly the placeholder
+  masking would have used. `createPlaceholderGenerator` in `src/utils/ignore-types.ts` already
+  produces those deterministically, so the projection can be made **byte identical to the masked
+  text**. That is the whole point: a decision taken on the projection is identical to the decision
+  masking took, by construction, rather than by an argument about markdown that has to be got right
+  case by case;
+- an **offset map** both ways between projection coordinates and source coordinates. The ranges are
+  sorted and disjoint, so this is a pair of parallel arrays and a binary search, the same shape as
+  `ProtectedRanges` itself.
+
+A rule then:
+
+1. runs its line oriented expressions against the **projection**;
+2. maps each resulting edit range back to **source** coordinates;
+3. drops any edit that lands inside a placeholder, since that is a protected range;
+4. takes any mdast node positions it needs from the **original** text as it does now, mapping them
+   into projection coordinates through the map where the two have to meet.
+
+Step 1 is what makes the six tractable: `heading-blank-lines` counting blank lines, the
+`empty-line-around-*` family looking at the line either side of a construct,
+`remove-empty-list-markers` taking a blockquote prefix with its match, and
+`move-math-block-indicators` reading the line a block starts on, all see exactly the document they
+saw before.
+
+`redactProtected` becomes the window sized special case of this and should be reimplemented on top
+of it rather than kept separate.
+
+Cost: one string build of the document per ignore type set per batch, no parse. Masking paid that
+too, and then paid for a parse on top. Cache it on the context so the rules in a batch that share an
+ignore set share the projection, the way they already share the ranges. Watch the parse count and
+the lint time after the first rule moves onto it; if the projection is being rebuilt per rule rather
+than per batch it will show up immediately, which is exactly what happened when a rule built its own
+`LintContext`.
+
+What to verify first, before converting anything onto it: assert on the corpus that the projection
+equals the text `ignoreListOfTypes` produces for the same document and ignore types. That is a
+direct, cheap equality check, and it is the same kind of evidence that settled whether the range
+index matched masking in the first place. If that assertion holds, the six conversions become
+ordinary work.
+
+Until this exists those six hold masking alive, and with it the ~14 parses that `ignoreListOfTypes`
+costs.
 
 The remaining parses split roughly as: one per batch for the ranges, which is the floor, plus the
 masking parses those six rules still force.
